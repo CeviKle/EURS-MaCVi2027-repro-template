@@ -34,7 +34,7 @@ not needed. Delete `src/joint_model.py` (the baseline's network) and the files t
   outputs `restored_image` and `seg_logits`, at most 12 GFLOPs and 1.0 M parameters. We compare it with your leaderboard ONNX.
 * **Training code is not needed.** A link to it in `METHOD.md` is welcome.
 * **No network at run time**, so weights cannot be downloaded by your code. Make inference deterministic (fixed seeds,
-  `model.eval()`, no test-time randomness). Time limit 90 minutes on one RTX 3090-class GPU.
+  `model.eval()`, no test-time randomness). We run on one RTX 3090-class GPU.
 
 ## Weights: commit them, or give a public link (one way, not both)
 
