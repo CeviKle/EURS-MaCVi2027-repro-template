@@ -1,6 +1,6 @@
 # EURS @ MaCVi WACV 2027: reproduction repository template
 
-Fork or copy this repository for your final hand-in. The organizers **re-run your inference** on the testing-phase images
+Start your final hand-in from this repository: click **Use this template** on GitHub (or download it as a ZIP). Do not copy its `.git` folder. The organizers **re-run your inference** on the testing-phase images
 with the weights of the submission you report, score it with the leaderboard evaluator and compare. Only teams whose result
 reproduces are ranked, in **both** tracks (F = 0.70 x Track 2 + 0.30 x Track 1), so hand in one repository (or one
 folder per track) for each track you entered.
@@ -12,13 +12,19 @@ folder per track) for each track you entered.
 ```
 METHOD.md            one page: approach, training data, ALL external data / pretrained models, anything non-standard at inference
 repro.yaml           team, track, submission_id (your best-scoring TESTING-PHASE submission in this track), contact
-requirements.txt     ONLY extra pip packages the base image does not have, pinned (name==x.y.z); empty if you need none
+requirements.txt     ONLY extra pip packages the base image does not have, pinned (name==x.y.z); empty if you need none.
+                     Never paste your whole `pip freeze`: it would replace the base image's PyTorch 2.4.0 and numpy
 src/                 your model and utility code, importable, no absolute paths
-run.py               main(model_dir, input_dir, output_dir, device)       <- both tracks (see below)
-export_onnx.py       main(model_dir, out_onnx)                            <- Track 2 only
-weights/             your checkpoint, or weights_link.yaml with a public download link (see below)
+run.py               Track 1:  main(model_dir, input_dir, output_dir, device)
+export_onnx.py       Track 2:  main(model_dir, out_onnx)
+weights/             your checkpoint (committed), OR weights_link.yaml with a public download link, not both (see below)
 repro_check.py       this template's checker: run it before you hand in
+docker/Dockerfile    the organizers' base image (build it to test your code the way we run it)
 ```
+
+**Which files for which track.** *Track 1:* `run.py` is required; delete `export_onnx.py`. *Track 2:* `export_onnx.py` is required; `run.py` is
+not needed. Delete `src/joint_model.py` (the baseline's network) and the files that do not apply, and replace the baseline code in `run.py` /
+`export_onnx.py` with your own. If you committed your weights, delete `weights/weights_link.yaml`.
 
 * `run.py` reads the degraded images in `input_dir` and writes `output_dir/restored/<stem>.png` (RGB) and
   `output_dir/seg_masks/<stem>.png` (single channel, labels 0 to 4), resized to the scoring size: longest side at most 1024 px,
@@ -66,15 +72,17 @@ python repro_check.py . --run --input /path/to/degraded --n 5  # also runs main(
 python repro_check.py . --export-onnx                          # Track 2: also exports and checks the ONNX file
 python repro_check.py . --download-weights                     # link-based repo: download the weights into weights/ first
 ```
-No installation needed. For the closest match to our environment run it in the base image with the network off:
+No installation needed. To run it the way the organizers do (base image, **no network**), build the base image once and use it:
 
 ```bash
+docker build -t eurs-base docker/
 docker run --rm --network none --gpus all -v "$PWD":/pkg:ro -v /path/to/images:/in:ro -v /tmp/out:/out \
-    pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime python /pkg/repro_check.py /pkg --run --input /in --output /out
+    eurs-base python /pkg/repro_check.py /pkg --run --input /in --output /out
 ```
-(The base image is that PyTorch image plus numpy, pillow, opencv-python-headless, timm, einops, onnx, pyyaml, scipy,
-scikit-image. Your `requirements.txt` is installed on top before the run.) The checker validates the *form* of your hand-in; whether
-the results reproduce is decided by the organizers by running it.
+(Leave out `--gpus all` if you have no GPU: the check then runs on the CPU, which can differ from a GPU run by one grey level in a few pixels.)
+For a link-based repository run `python repro_check.py . --download-weights` first, so that the weights are in `weights/` for the test. Your `requirements.txt`
+is installed on top of the base image before the real run. The checker validates the *form* of your hand-in; whether the results reproduce is decided
+by the organizers by running it.
 
 ## What happens next
 

@@ -8,11 +8,12 @@
 
 One file, no installation. It needs only the Python standard library for the static checks; `--run` needs
 numpy and pillow (and whatever your own code needs), `--export-onnx` needs onnx. Run the `--run` check inside
-the organizers' base image if you can (pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime plus numpy, pillow,
+the organizers' base image if you can (docker/Dockerfile: PyTorch 2.4.0 plus numpy, pillow,
 opencv-python-headless, timm, einops, onnx, pyyaml, scipy, scikit-image) with the network switched off:
 
+    docker build -t eurs-base docker/        # once: the organizers' base image
     docker run --rm --network none --gpus all -v "$PWD":/pkg:ro -v /path/to/images:/in:ro -v /tmp/out:/out \\
-        pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime python /pkg/repro_check.py /pkg --run --input /in --output /out
+        eurs-base python /pkg/repro_check.py /pkg --run --input /in --output /out
 
 Exit code 0 = no errors (warnings are only advice). This tool checks the form of your hand-in; it cannot tell whether
 your results will reproduce, which the organizers decide by actually re-running them.
@@ -109,10 +110,11 @@ def check_repro_yaml(pkg):
         err("repro.yaml: submission_id must be the positive integer ID of your best-scoring TESTING-PHASE submission in this track")
     if not isinstance(d.get("contact"), str) or "@" not in d["contact"]:
         err("repro.yaml: contact must be an e-mail address")
-    if d.get("team") == "your-team-name" or d.get("submission_id") == 12345:
+    template_values = d.get("team") == "your-team-name" or d.get("submission_id") == 12345
+    if template_values:
         warn("repro.yaml still has the template values (the organizers rebuild it from your factsheet, but fill it in anyway)")
     if len(errors) == before:
-        ok("repro.yaml")
+        ok("repro.yaml is valid" + (" (but see the warning above)" if template_values else ""))
     return d
 
 
@@ -125,7 +127,7 @@ def check_method(pkg):
     if not text.strip():
         err("METHOD.md is empty")
     elif "<name>" in text and "<1 / 2 / both>" in text:
-        warn("METHOD.md still contains the template placeholders")
+        err("METHOD.md still contains the template placeholders: describe your method (approach, training data, external data)")
     else:
         ok("METHOD.md")
 
@@ -133,7 +135,10 @@ def check_method(pkg):
 def check_entry_points(pkg, track):
     run_py = os.path.join(pkg, "run.py")
     if not os.path.isfile(run_py):
-        err("run.py is missing")
+        if track != "eurs-t2":
+            err("run.py is missing")
+        else:
+            ok("run.py not needed for Track 2")
     else:
         params, why = function_params(run_py, "main")
         if params == "invalid":
