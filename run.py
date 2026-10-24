@@ -56,6 +56,7 @@ def main(model_dir, input_dir, output_dir, device):
         x = torch.from_numpy(np.asarray(small, dtype=np.float32).transpose(2, 0, 1) / 255.0).unsqueeze(0).to(device)
         restored, seg_logits = model(x)
         r = restored[0].clamp(0, 1).cpu().numpy().transpose(1, 2, 0)
+        # NOTE: copy YOUR OWN conversion to 8 bit here (this baseline truncates; many methods use .round()):
         Image.fromarray((r * 255).astype(np.uint8)).resize((tw, th), Image.BILINEAR).save(
             os.path.join(output_dir, "restored", stem + ".png"))
         m = seg_logits[0].argmax(dim=0).byte().cpu().numpy()

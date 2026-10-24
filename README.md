@@ -12,7 +12,7 @@ folder per track) for each track you entered.
 ```
 METHOD.md            one page: approach, training data, ALL external data / pretrained models, anything non-standard at inference
 repro.yaml           team, track, submission_id (your best-scoring TESTING-PHASE submission in this track), contact
-requirements.txt     extra pip packages beyond the base image, pinned (name==x.y.z)
+requirements.txt     ONLY extra pip packages the base image does not have, pinned (name==x.y.z); empty if you need none
 src/                 your model and utility code, importable, no absolute paths
 run.py               main(model_dir, input_dir, output_dir, device)       <- both tracks (see below)
 export_onnx.py       main(model_dir, out_onnx)                            <- Track 2 only
@@ -30,16 +30,33 @@ repro_check.py       this template's checker: run it before you hand in
 * **No network at run time**, so weights cannot be downloaded by your code. Make inference deterministic (fixed seeds,
   `model.eval()`, no test-time randomness). Time limit 90 minutes on one RTX 3090-class GPU.
 
-## Weights: commit them, or give a public link
+## Weights: commit them, or give a public link (one way, not both)
 
-Small models can be committed in `weights/`. Larger ones go behind a public link described in `weights/weights_link.yaml`
-(`url:` and `sha256:` of the file); give the same link and hash in your factsheet. We download it **once, before the run**,
-and verify the hash. Accepted: direct links, GitHub releases, Hugging Face, Dropbox, Google Drive **file** links shared with
-"anyone with the link"; one file or one `.zip` / `.tar.gz`. Not accepted: Drive folders, OneDrive, links that need a login,
-Git LFS. Keep the link working at least until the final results are announced (October 30, 2026).
+**Committed:** small models go in `weights/`. Check that git really tracks them (`git ls-files weights`); delete `weights/weights_link.yaml`.
+
+**Link:** larger models go behind a public link described in `weights/weights_link.yaml` (`url:`, `sha256:` of the file, and optionally
+`filename:`); give the same link and hash in your factsheet. We download it **once, before the run**, verify the hash and save it in `weights/`
+under the name the link's server gives it, or under `filename:` if you set it (recommended, so your `run.py` knows the exact name). A `.zip` or
+`.tar.gz` is unpacked into `weights/` keeping its inner folders. Accepted: direct links, GitHub releases, Hugging Face, Dropbox, Google Drive
+**file** links shared with "anyone with the link"; one file or one archive. Not accepted: Drive folders, OneDrive, links that need a login, Git LFS.
+Keep the link working at least until the final results are announced (October 30, 2026). Do not commit the downloaded file to a link-based repository.
+To test a link-based repository yourself, fetch the file into `weights/` first with `python repro_check.py . --download-weights`, then run the checks.
 
 The repository must be **public** (or readable by the organizers) and pinned: give the **commit hash** in the factsheet and do not
 change that commit afterwards.
+
+## Reproduce your own pipeline exactly
+
+We compare our re-run with the submission you uploaded to the leaderboard, so `run.py` must do **exactly what your own inference script did** for that
+submission: the same resizing and interpolation, the same normalisation, the same conversion to 8 bit (rounding or truncation: copy your own, the
+template's `run.py` uses the organizer baseline's), the same output sizes, the same device type if you can (the reference is whatever you used for the leaderboard;
+say in `METHOD.md` if it was a CPU or an unusual GPU). Run your own script and `run.py` on the same images and check the outputs are identical.
+
+## How a re-run is judged
+
+We re-run on an NVIDIA GPU of the RTX 3090 class, with PyTorch 2.4.0 (the base image), and compare image by image with your leaderboard outputs and
+metric by metric with your leaderboard scores. Tiny differences that come from the GPU or from rounding are tolerated within a tolerance we set from
+measured run-to-run noise; anything larger is reviewed by a person before any decision. The tolerance is not published as a number.
 
 ## Check your repository before you hand in
 
@@ -47,6 +64,7 @@ change that commit afterwards.
 python repro_check.py .                                        # layout, repro.yaml, weights link, signatures
 python repro_check.py . --run --input /path/to/degraded --n 5  # also runs main() on 5 images and checks the outputs
 python repro_check.py . --export-onnx                          # Track 2: also exports and checks the ONNX file
+python repro_check.py . --download-weights                     # link-based repo: download the weights into weights/ first
 ```
 No installation needed. For the closest match to our environment run it in the base image with the network off:
 

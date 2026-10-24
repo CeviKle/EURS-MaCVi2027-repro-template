@@ -4,6 +4,7 @@
     python repro_check.py .                              # layout, repro.yaml, weights link, run.py/export_onnx.py signatures
     python repro_check.py . --run --input DIR [--n 5]    # also run main() on a few of your degraded images and check outputs
     python repro_check.py . --export-onnx                # Track 2: also run export_onnx.py and check the ONNX file
+    python repro_check.py . --download-weights           # link-based repository: fetch the weights into weights/ so --run can work
 
 One file, no installation. It needs only the Python standard library for the static checks; `--run` needs
 numpy and pillow (and whatever your own code needs), `--export-onnx` needs onnx. Run the `--run` check inside
@@ -73,7 +74,7 @@ def read_flat_yaml(path):
                 continue
             key, val = line.split(":", 1)
             val = val.strip().strip("'\"")
-            if val.isdigit():
+            if val.isdigit() and key.strip() == "submission_id":
                 val = int(val)
             data[key.strip()] = val
     return data
@@ -155,6 +156,10 @@ def check_entry_points(pkg, track):
                 ok("export_onnx.py main() signature")
 
 
+BASE_IMAGE_PACKAGES = ("torch", "torchvision", "torchaudio", "numpy", "pillow", "opencv-python-headless", "opencv-python",
+                       "timm", "einops", "onnx", "pyyaml", "scipy", "scikit-image")
+
+
 def check_weights(pkg):
     wdir = os.path.join(pkg, "weights")
     link = os.path.join(pkg, LINK_FILE)
@@ -164,10 +169,14 @@ def check_weights(pkg):
         d = read_flat_yaml(link)
         url = d.get("url")
         sha = str(d.get("sha256") or "").lower()
+        if real:
+            err(f"weights are committed in weights/ AND {LINK_FILE} exists: keep only one. "
+                f"Delete {LINK_FILE} if the committed weights are the ones to use, or remove the committed files and keep the link")
         if not isinstance(url, str) or urllib.parse.urlparse(url).scheme != "https":
-            err(f"{LINK_FILE}: `url:` must be an https link")
+            err(f"{LINK_FILE}: `url:` must be an https link (if your weights are committed in weights/, delete {LINK_FILE})")
         elif "example.org" in url:
-            err(f"{LINK_FILE} still has the template link (https://example.org/...)")
+            err(f"{LINK_FILE} still has the template link (https://example.org/...): put your real link in it, "
+                f"or delete {LINK_FILE} if your weights are committed in weights/")
         elif "drive.google.com" in url and "/folders/" in url:
             err(f"{LINK_FILE}: Google Drive folder links are not supported; link to one file or one .zip")
         elif "1drv.ms" in url or "onedrive" in url:
@@ -176,6 +185,12 @@ def check_weights(pkg):
             ok("weights link")
         if not re.fullmatch(r"[0-9a-f]{64}", sha) or set(sha) == {"0"}:
             warn(f"{LINK_FILE}: no valid `sha256:` (strongly recommended: sha256sum of the downloaded file)")
+        fn = d.get("filename")
+        if fn is not None and (not isinstance(fn, str) or os.path.basename(fn) != fn or fn.startswith(".")):
+            err(f"{LINK_FILE}: `filename:` must be a plain file name without folders")
+        if not real:
+            print("note    the link is not downloaded by this check; to run --run on a link-based repository first fetch the file "
+                  "with:  python repro_check.py . --download-weights")
     elif not real:
         err("no weights: put them in weights/ (small models) or describe the download in weights/weights_link.yaml")
     else:
@@ -186,6 +201,69 @@ def check_weights(pkg):
             with open(p, "rb") as fh:
                 if fh.read(60).startswith(b"version https://git-lfs"):
                     err(f"weights/{f} is a Git LFS pointer, not the weights: Git LFS is not supported, use a download link")
+    # committed files must really be tracked by git (a .gitignore can silently drop them)
+    if real and os.path.isdir(os.path.join(pkg, ".git")) and shutil.which("git"):
+        import subprocess
+        for f in real:
+            p = os.path.join("weights", f)
+            tracked = subprocess.run(["git", "ls-files", "--error-unmatch", p], cwd=pkg, capture_output=True).returncode == 0
+            if not tracked:
+                err(f"{p} is not tracked by git (check .gitignore, then `git add {p}`): the organizers would not get it")
+
+
+def download_weights(pkg):
+    """--download-weights: fetch the link of weights_link.yaml into weights/ exactly as the organizers' pipeline does."""
+    import hashlib
+    import urllib.request
+    link = os.path.join(pkg, LINK_FILE)
+    if not os.path.isfile(link):
+        err(f"no {LINK_FILE}: nothing to download")
+        return
+    d = read_flat_yaml(link)
+    url = str(d.get("url") or "")
+    if urllib.parse.urlparse(url).scheme != "https":
+        err(f"{LINK_FILE}: `url:` must be an https link")
+        return
+    u = urllib.parse.urlparse(url)
+    if u.hostname in ("drive.google.com", "docs.google.com"):
+        m = re.search(r"/file/d/([\w-]+)", u.path) or re.search(r"[?&]id=([\w-]+)", u.query)
+        if not m:
+            err("cannot find the Google Drive file id in the link (folder links are not supported)")
+            return
+        url = f"https://drive.usercontent.google.com/download?id={m.group(1)}&export=download&confirm=t"
+    elif u.hostname in ("www.dropbox.com", "dropbox.com"):
+        url = re.sub(r"dl=0", "dl=1", url) if "dl=" in url else url + ("&" if "?" in url else "?") + "dl=1"
+    elif u.hostname == "github.com" and "/blob/" in u.path:
+        url = url.replace("/blob/", "/raw/", 1)
+    elif u.hostname == "huggingface.co" and "/blob/" in u.path:
+        url = url.replace("/blob/", "/resolve/", 1)
+    req = urllib.request.Request(url, headers={"User-Agent": "eurs-repro-check"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            ctype = (resp.headers.get("Content-Type") or "").lower()
+            cd = resp.headers.get("Content-Disposition") or ""
+            m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", cd, flags=re.I) or re.search(r'filename="?([^";]+)"?', cd, flags=re.I)
+            name = d.get("filename") or (urllib.parse.unquote(m.group(1)).strip() if m else os.path.basename(urllib.parse.urlparse(resp.geturl()).path)) or "weights.bin"
+            name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(name)).lstrip(".") or "weights.bin"
+            data = resp.read()
+    except Exception as exc:
+        err(f"download failed: {exc}")
+        return
+    if "text/html" in ctype and len(data) < (2 << 20):
+        err("the link returned a web page, not a file: is it shared as 'Anyone with the link' and a direct file link?")
+        return
+    digest = hashlib.sha256(data).hexdigest()
+    want = str(d.get("sha256") or "").lower()
+    if want and digest != want:
+        err(f"SHA-256 mismatch: {LINK_FILE} says {want}, the downloaded file is {digest}")
+        return
+    os.makedirs(os.path.join(pkg, "weights"), exist_ok=True)
+    out = os.path.join(pkg, "weights", name)
+    with open(out, "wb") as f:
+        f.write(data)
+    ok(f"downloaded {len(data)} bytes to weights/{name} (sha256 {digest[:12]}...). The organizers' pipeline saves it under the same name, "
+       f"or under `filename:` if you set it. A .zip or .tar.gz is unpacked into weights/ there (not by this command: unpack it yourself to test). "
+       "Do not commit the downloaded file to a link-based repository.")
 
 
 def check_tree(pkg):
@@ -227,6 +305,14 @@ def check_tree(pkg):
                 unpinned.append(s)
         if unpinned:
             warn("requirements.txt: pin exact versions (name==x.y.z): " + ", ".join(unpinned))
+        base = []
+        for line in open(req, encoding="utf-8", errors="ignore"):
+            name = re.split(r"[=<>!~ \[;@]", line.split("#", 1)[0].strip().lower(), maxsplit=1)[0].replace("_", "-")
+            if name in BASE_IMAGE_PACKAGES:
+                base.append(name)
+        if base:
+            warn("requirements.txt lists packages the base image already has (" + ", ".join(base) + "): installing them would replace the "
+                 "organizers' versions (PyTorch 2.4.0 etc.) and change your results. List ONLY extra packages; leave the file empty if you need none")
 
 
 # ------------------------------------------------------------------ dynamic checks
@@ -399,6 +485,8 @@ def main():
     ap.add_argument("--output", help="keep --run outputs here (default: temporary folder)")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--export-onnx", action="store_true", help="Track 2: run export_onnx.py and check the file")
+    ap.add_argument("--download-weights", action="store_true",
+                    help="download the weights_link.yaml file into weights/ (to test a link-based repository with --run)")
     args = ap.parse_args()
 
     pkg = os.path.abspath(args.package)
@@ -406,6 +494,10 @@ def main():
         print(f"{pkg} is not a folder")
         return 2
     print(f"checking {pkg}\n")
+    if args.download_weights:
+        download_weights(pkg)
+        print()
+        return 1 if errors else 0
     spec = check_repro_yaml(pkg)
     track = (spec or {}).get("track")
     check_method(pkg)

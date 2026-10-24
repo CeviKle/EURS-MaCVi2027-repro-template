@@ -1,5 +1,2 @@
 __pycache__/
 *.pyc
-weights/*
-!weights/weights_link.yaml
-!weights/README.md
