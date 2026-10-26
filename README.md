@@ -17,7 +17,7 @@ requirements.txt     ONLY extra pip packages the base image does not have, pinne
 src/                 your model and utility code, importable, no absolute paths
 run.py               Track 1:  main(model_dir, input_dir, output_dir, device)
 export_onnx.py       Track 2:  main(model_dir, out_onnx)
-onnx/submitted_model.onnx   Track 2: a copy of the exact ONNX file you uploaded to the leaderboard (see below)
+onnx/                Track 2: onnx/submitted_model.onnx = a copy of the exact ONNX file you uploaded to the leaderboard (see below)
 weights/             your checkpoint (committed), OR weights_link.yaml with a public download link, not both (see below)
 repro_check.py       this template's checker: run it before you hand in
 docker/Dockerfile    the organizers' base image (build it to test your code the way we run it)
@@ -26,6 +26,23 @@ docker/Dockerfile    the organizers' base image (build it to test your code the 
 **Which files for which track.** *Track 1:* `run.py` is required; delete `export_onnx.py` and the `onnx/` folder. *Track 2:* `export_onnx.py` is required and `onnx/submitted_model.onnx` is strongly recommended; `run.py` is
 not needed. Delete `src/joint_model.py` (the baseline's network) and the files that do not apply, and replace the baseline code in `run.py` /
 `export_onnx.py` with your own. If you committed your weights, delete `weights/weights_link.yaml`.
+
+**Everything sits in the root of the repository** (not inside a sub-folder), at exactly these paths. A finished **Track 2** repository looks like this:
+
+```
+my-eurs-track2/
+  repro.yaml                      team, track: eurs-t2, submission_id, contact
+  METHOD.md                       approach, training data, external data
+  requirements.txt                extra pinned packages (may be empty)
+  export_onnx.py                  main(model_dir, out_onnx): regenerates the ONNX from the weights
+  src/                            the model code export_onnx.py imports
+  weights/best.pt                 your checkpoint, committed  (OR weights/weights_link.yaml, not both)
+  onnx/submitted_model.onnx       a copy of the ONNX you uploaded to the leaderboard
+  repro_check.py                  from this template, leave it as is
+```
+
+A finished **Track 1** repository has the same files, with `run.py` instead of `export_onnx.py` and no `onnx/` folder. A team that entered both
+tracks makes two such repositories.
 
 * `run.py` reads the degraded images in `input_dir` and writes `output_dir/restored/<stem>.png` (RGB) and
   `output_dir/seg_masks/<stem>.png` (single channel, labels 0 to 4), resized to the scoring size: longest side at most 1024 px,
