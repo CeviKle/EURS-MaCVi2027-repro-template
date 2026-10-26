@@ -126,3 +126,9 @@ From October 28 we fetch each repository at the commit you name, build the envir
 the outputs and compare with your reported testing-phase result. If something fails for a packaging reason we write to the
 address in `repro.yaml`. Anything that is not a clean match is reviewed by a person; no team is disqualified automatically.
 Final rankings are announced by October 30, 2026 (AoE).
+
+## License
+
+This template is released under the MIT License (see `LICENSE`). When you click **Use this template**, the `LICENSE` file is copied into your repository:
+replace it (or at least its copyright line) with the license of **your own** code. The baseline model in `src/` and `run.py` is the organizers' reference baseline.
+
