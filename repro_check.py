@@ -425,8 +425,8 @@ def check_run(pkg, input_dir, n, output_dir, device):
             if max(r.size) > MAX_SIDE_ERR:
                 err(f"{stem}: output longest side {max(r.size)} px is over {MAX_SIDE_ERR}")
             elif r.size != exp:
-                warn(f"{stem}: output size {r.size}, the scoring size for this input is {exp} "
-                     f"(longest side at most {MAX_SIDE_WARN} px, aspect kept); other sizes are resized by the evaluator")
+                err(f"{stem}: output size {r.size}, but the scoring size for this input is exactly {exp} (longest side {MAX_SIDE_WARN} px, "
+                    f"aspect ratio kept, downscale only). The evaluator does NOT resize submissions and rejects any other size")
             vals = np.unique(np.asarray(m))
             if vals.size and (vals.min() < 0 or vals.max() >= NUM_CLASSES):
                 err(f"seg_masks/{stem}.png has labels outside 0..{NUM_CLASSES - 1}: {vals.tolist()}")

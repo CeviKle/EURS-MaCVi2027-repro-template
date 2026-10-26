@@ -45,8 +45,9 @@ A finished **Track 1** repository has the same files, with `run.py` instead of `
 tracks makes two such repositories.
 
 * `run.py` reads the degraded images in `input_dir` and writes `output_dir/restored/<stem>.png` (RGB) and
-  `output_dir/seg_masks/<stem>.png` (single channel, labels 0 to 4), resized to the scoring size: longest side at most 1024 px,
-  aspect ratio kept. **File formats:** `restored/` files must really be PNG or JPEG, `seg_masks/` files must really be PNG (the evaluator identifies
+  `output_dir/seg_masks/<stem>.png` (single channel, labels 0 to 4), resized to **exactly** the scoring size: the input scaled down so that its longest side is 1024 px, aspect ratio kept (an input
+  whose longest side is already 1024 px or less keeps its size). The evaluator does not resize for you and **rejects any other size**: use the same
+  `resize_for_submission.py` step as for your leaderboard submissions. **File formats:** `restored/` files must really be PNG or JPEG, `seg_masks/` files must really be PNG (the evaluator identifies
   a file by its content, not by its name or extension; any other format is rejected). The input images in `input_dir` are the **full-resolution** files
   we released (some up to tens of megapixels), so decode them one at a time. **Every output must come from its own input image only.** `model_dir` is your `weights/` folder.
   `run.py` here is the organizer baseline: replace the model, keep the signature and the output format.
@@ -78,7 +79,7 @@ under the name the link's server gives it, or under `filename:` if you set it (r
 Keep the link working at least until the final results are announced (October 30, 2026). Do not commit the downloaded file to a link-based repository.
 To test a link-based repository yourself, fetch the file into `weights/` first with `python repro_check.py . --download-weights`, then run the checks.
 
-The repository must be **public** (or readable by the organizers) and pinned: give the **commit hash** in the factsheet and do not
+The repository must be **public** (we clone it over https without credentials, so access-restricted repositories cannot be fetched) and pinned: give the **commit hash** in the factsheet and do not
 change that commit afterwards.
 
 ## Reproduce your own pipeline exactly
@@ -95,7 +96,7 @@ any adaptation of the model. Say in `METHOD.md` which data your weights were tra
 
 ## How a re-run is judged
 
-We re-run on an NVIDIA GPU of the RTX 3090 class, with PyTorch 2.4.0 (the base image), and compare image by image with your leaderboard outputs and
+We re-run on an NVIDIA GPU of the RTX 3090 class, with PyTorch 2.4.0, CUDA 12.1 and Python 3.11 (the base image), and compare image by image with your leaderboard outputs and
 metric by metric with your leaderboard scores. Tiny differences that come from the GPU or from rounding are tolerated within a tolerance we set from
 measured run-to-run noise; anything larger is reviewed by a person before any decision. The tolerance is not published as a number.
 

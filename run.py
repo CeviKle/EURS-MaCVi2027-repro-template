@@ -7,8 +7,8 @@ The organizers call   main(model_dir, input_dir, output_dir, device)   and nothi
   output_dir  write here, one file per input image, same file stem:
                   output_dir/restored/<stem>.png    RGB restored image
                   output_dir/seg_masks/<stem>.png   single-channel mask, labels 0..4
-              both resized to the scoring size: longest side at most 1024 px, aspect ratio kept
-              (downscale only), exactly like the leaderboard submission format
+              both resized to EXACTLY the scoring size: longest side 1024 px, aspect ratio kept
+              (downscale only: an input at or below 1024 px keeps its size); the evaluator rejects any other size
   device      "cuda" or "cpu"
 
 Rules for this file (see README.md): inference only; every output must come from its own input
