@@ -34,6 +34,7 @@ TRACKS = ("eurs-t1", "eurs-t2")
 TEAM_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 MAIN_PARAMS = ["model_dir", "input_dir", "output_dir", "device"]
 ONNX_PARAMS = ["model_dir", "out_onnx"]
+SUBMITTED_ONNX = "onnx/submitted_model.onnx"
 LINK_FILE = os.path.join("weights", "weights_link.yaml")
 MAX_PACKAGE_BYTES = 5 * 1024 ** 3
 MAX_SIDE_WARN = 1024
@@ -159,6 +160,12 @@ def check_entry_points(pkg, track):
                 err(f"export_onnx.py must define main({', '.join(ONNX_PARAMS)})")
             else:
                 ok("export_onnx.py main() signature")
+        sub = os.path.join(pkg, SUBMITTED_ONNX)
+        if os.path.isfile(sub):
+            ok(f"{SUBMITTED_ONNX} present ({os.path.getsize(sub) / 1e6:.1f} MB); its SHA-256 goes into the factsheet")
+        else:
+            warn(f"{SUBMITTED_ONNX} is missing: add a copy of the exact ONNX file you uploaded to the leaderboard "
+                 "(strongly recommended; the organizers compare your export with the leaderboard file either way)")
 
 
 BASE_IMAGE_PACKAGES = ("torch", "torchvision", "torchaudio", "numpy", "pillow", "opencv-python-headless", "opencv-python",
@@ -483,7 +490,41 @@ def check_export(pkg):
         err(f"{params / 1e6:.2f} M parameters, over the 1.0 M limit")
     else:
         ok(f"{params / 1e6:.3f} M parameters (limit 1.0 M); GFLOPs (limit 12) are measured by the organizers' pipeline")
+    compare_with_submitted(pkg, target, onnx)
     shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _graph_signature(model):
+    import numpy as np
+    from onnx import numpy_helper
+    weights = {i.name: numpy_helper.to_array(i) for i in model.graph.initializer}
+    nodes = [(n.op_type, tuple(n.input), tuple(n.output)) for n in model.graph.node]
+    return weights, nodes
+
+
+def compare_with_submitted(pkg, exported_path, onnx):
+    """Is the file export_onnx.py writes the same model as onnx/submitted_model.onnx? Byte-identical, or the same graph and
+    weights (different torch versions write a different producer_version / metadata header and nothing else)."""
+    import hashlib
+    import numpy as np
+    sub = os.path.join(pkg, SUBMITTED_ONNX)
+    if not os.path.isfile(sub):
+        return
+    sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+    if sha(sub) == sha(exported_path):
+        ok(f"the exported ONNX is byte-identical to {SUBMITTED_ONNX}")
+        return
+    try:
+        wa, na = _graph_signature(onnx.load(sub))
+        wb, nb = _graph_signature(onnx.load(exported_path))
+    except Exception as exc:
+        err(f"could not compare the exported ONNX with {SUBMITTED_ONNX}: {exc}")
+        return
+    if na == nb and wa.keys() == wb.keys() and all(wa[k].shape == wb[k].shape and np.array_equal(wa[k], wb[k]) for k in wa):
+        ok(f"the exported ONNX has the same graph and weights as {SUBMITTED_ONNX} (only the file header differs, which is fine)")
+    else:
+        err(f"the exported ONNX differs from {SUBMITTED_ONNX} (graph or weights): your export_onnx.py/weights do not regenerate "
+            "the file you submitted. Fix this before you hand in")
 
 
 def main():

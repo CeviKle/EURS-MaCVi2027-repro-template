@@ -2,8 +2,8 @@
 
 Start your final hand-in from this repository: click **Use this template** on GitHub (or download it as a ZIP). Do not copy its `.git` folder. The organizers **re-run your inference** on the testing-phase images
 with the weights of the submission you report, score it with the leaderboard evaluator and compare. Only teams whose result
-reproduces are ranked, in **both** tracks (F = 0.70 x Track 2 + 0.30 x Track 1), so hand in one repository (or one
-folder per track) for each track you entered.
+reproduces are ranked, in **both** tracks (F = 0.70 x Track 2 + 0.30 x Track 1), so hand in **one repository per
+track you entered**: a team that entered both tracks creates two repositories from this template, one for each track (each with its own `repro.yaml`, weights and commit).
 
 **Deadline: October 28, 2026, 23:59 AoE**, together with your factsheet (see the factsheet template).
 
@@ -17,12 +17,13 @@ requirements.txt     ONLY extra pip packages the base image does not have, pinne
 src/                 your model and utility code, importable, no absolute paths
 run.py               Track 1:  main(model_dir, input_dir, output_dir, device)
 export_onnx.py       Track 2:  main(model_dir, out_onnx)
+onnx/submitted_model.onnx   Track 2: a copy of the exact ONNX file you uploaded to the leaderboard (see below)
 weights/             your checkpoint (committed), OR weights_link.yaml with a public download link, not both (see below)
 repro_check.py       this template's checker: run it before you hand in
 docker/Dockerfile    the organizers' base image (build it to test your code the way we run it)
 ```
 
-**Which files for which track.** *Track 1:* `run.py` is required; delete `export_onnx.py`. *Track 2:* `export_onnx.py` is required; `run.py` is
+**Which files for which track.** *Track 1:* `run.py` is required; delete `export_onnx.py` and the `onnx/` folder. *Track 2:* `export_onnx.py` is required and `onnx/submitted_model.onnx` is strongly recommended; `run.py` is
 not needed. Delete `src/joint_model.py` (the baseline's network) and the files that do not apply, and replace the baseline code in `run.py` /
 `export_onnx.py` with your own. If you committed your weights, delete `weights/weights_link.yaml`.
 
@@ -34,6 +35,16 @@ not needed. Delete `src/joint_model.py` (the baseline's network) and the files t
   `run.py` here is the organizer baseline: replace the model, keep the signature and the output format.
 * `export_onnx.py` (Track 2) regenerates the ONNX file you submitted from your weights: static input (1, 3, H, W) in [0, 1],
   outputs `restored_image` and `seg_logits`, at most 12 GFLOPs and 1.0 M parameters. We compare it with your leaderboard ONNX.
+  **Put every step between your checkpoint and the final file into this one script** (export, graph simplification, any quantization or
+  fusing), so that `main(model_dir, out_onnx)` alone regenerates the file you uploaded. Packages that only the export needs (for example
+  `onnxsim`) go into `requirements.txt`, pinned; the export runs without network.
+* **`onnx/submitted_model.onnx` (Track 2, strongly recommended):** a copy of the exact ONNX file you uploaded to the leaderboard for the submission you
+  report. Give its SHA-256 in the factsheet. `python repro_check.py . --export-onnx` regenerates the file and tells you whether it equals your copy
+  (byte-identical, or the same graph and weights with only the file header, such as the torch version, different: that is fine). We check your export against the
+  leaderboard archive in any case; the copy lets you see a problem before you hand in.
+* **What we do with a Track 2 hand-in, in two steps.** (1) We regenerate the ONNX in a sandbox and compare it with your leaderboard file: it
+  must give the same outputs. (2) We then evaluate the regenerated file on the Jetson AGX Orin with the same pipeline as the leaderboard and compare
+  throughput, energy and accuracy with your leaderboard result. This applies to every team; differences are reviewed by a person.
 * **Training code is not needed.** A link to it in `METHOD.md` is welcome.
 * **No network at run time**, so weights cannot be downloaded by your code. Make inference deterministic (fixed seeds,
   `model.eval()`, no test-time randomness). We run on one RTX 3090-class GPU.
