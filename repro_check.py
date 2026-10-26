@@ -393,10 +393,11 @@ def check_run(pkg, input_dir, n, output_dir, device):
     stems = [os.path.splitext(f)[0] for f in chosen]
     hashes = {}
     for f, stem in zip(chosen, stems):
-        rp = os.path.join(out, "restored", stem + ".png")
+        # the evaluator accepts restored/<stem>.png, .jpg or .jpeg (PNG or JPEG content); masks must be seg_masks/<stem>.png
+        rp = next((q for q in (os.path.join(out, "restored", stem + e) for e in (".png", ".jpg", ".jpeg")) if os.path.isfile(q)), None)
         mp = os.path.join(out, "seg_masks", stem + ".png")
-        if not os.path.isfile(rp):
-            err(f"missing output restored/{stem}.png")
+        if rp is None:
+            err(f"missing output restored/{stem}.png (or .jpg / .jpeg)")
             continue
         if not os.path.isfile(mp):
             err(f"missing output seg_masks/{stem}.png")
@@ -404,6 +405,10 @@ def check_run(pkg, input_dir, n, output_dir, device):
         with Image.open(os.path.join(input_dir, f)) as im:
             exp = _scoring_size(*im.size)
         with Image.open(rp) as r, Image.open(mp) as m:
+            if r.format not in ("PNG", "JPEG"):
+                err(f"restored/{stem}.png is a {r.format} file: the evaluator identifies files by their CONTENT and only accepts PNG or JPEG")
+            if m.format != "PNG":
+                err(f"seg_masks/{stem}.png is a {m.format} file: masks must be real PNG files (the evaluator reads content, not the file name)")
             if r.mode != "RGB":
                 err(f"restored/{stem}.png must be RGB, found {r.mode}")
             if m.mode not in ("L", "P"):
@@ -421,7 +426,7 @@ def check_run(pkg, input_dir, n, output_dir, device):
             hashes[stem] = (hash(np.asarray(r).tobytes()), hash(np.asarray(m).tobytes()))
     if len(set(hashes.values())) < len(hashes) and len(hashes) > 1:
         warn("two different inputs produced identical outputs: every output must come from its own input image only")
-    extra = sorted(set(os.listdir(os.path.join(out, "restored"))) - {s + ".png" for s in stems}) \
+    extra = sorted({f for f in os.listdir(os.path.join(out, "restored")) if os.path.splitext(f)[0] not in set(stems)}) \
         if os.path.isdir(os.path.join(out, "restored")) else []
     if extra:
         warn(f"restored/ has files that do not belong to the {len(chosen)} inputs: {extra[:3]}")

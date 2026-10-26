@@ -28,7 +28,9 @@ not needed. Delete `src/joint_model.py` (the baseline's network) and the files t
 
 * `run.py` reads the degraded images in `input_dir` and writes `output_dir/restored/<stem>.png` (RGB) and
   `output_dir/seg_masks/<stem>.png` (single channel, labels 0 to 4), resized to the scoring size: longest side at most 1024 px,
-  aspect ratio kept. **Every output must come from its own input image only.** `model_dir` is your `weights/` folder.
+  aspect ratio kept. **File formats:** `restored/` files must really be PNG or JPEG, `seg_masks/` files must really be PNG (the evaluator identifies
+  a file by its content, not by its name or extension; any other format is rejected). The input images in `input_dir` are the **full-resolution** files
+  we released (some up to tens of megapixels), so decode them one at a time. **Every output must come from its own input image only.** `model_dir` is your `weights/` folder.
   `run.py` here is the organizer baseline: replace the model, keep the signature and the output format.
 * `export_onnx.py` (Track 2) regenerates the ONNX file you submitted from your weights: static input (1, 3, H, W) in [0, 1],
   outputs `restored_image` and `seg_logits`, at most 12 GFLOPs and 1.0 M parameters. We compare it with your leaderboard ONNX.
