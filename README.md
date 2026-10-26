@@ -60,6 +60,11 @@ submission: the same resizing and interpolation, the same normalisation, the sam
 template's `run.py` uses the organizer baseline's), the same output sizes, the same device type if you can (the reference is whatever you used for the leaderboard;
 say in `METHOD.md` if it was a CPU or an unusual GPU). Run your own script and `run.py` on the same images and check the outputs are identical.
 
+## Data use
+
+The released testing-phase images are for producing your submission only. Do not use them for training, tuning, model selection, pseudo-labelling or
+any adaptation of the model. Say in `METHOD.md` which data your weights were trained on, and answer the matching question in the factsheet.
+
 ## How a re-run is judged
 
 We re-run on an NVIDIA GPU of the RTX 3090 class, with PyTorch 2.4.0 (the base image), and compare image by image with your leaderboard outputs and
