@@ -21,6 +21,7 @@ onnx/                Track 2: onnx/submitted_model.onnx = a copy of the exact ON
 weights/             your checkpoint (committed), OR weights_link.yaml with a public download link, not both (see below)
 repro_check.py       this template's checker: run it before you hand in
 docker/Dockerfile    the organizers' base image (build it to test your code the way we run it)
+Dockerfile           OPTIONAL, at the repository root: only if you need another PyTorch/CUDA/Python version (see "Need a different PyTorch version?")
 ```
 
 **Which files for which track.** *Track 1:* `run.py` is required; delete `export_onnx.py` and the `onnx/` folder. *Track 2:* `export_onnx.py` is required and `onnx/submitted_model.onnx` is strongly recommended; `run.py` is
@@ -51,6 +52,10 @@ tracks makes two such repositories.
   a file by its content, not by its name or extension; any other format is rejected). The input images in `input_dir` are the **full-resolution** files
   we released (some up to tens of megapixels), so decode them one at a time. **Every output must come from its own input image only.** `model_dir` is your `weights/` folder.
   `run.py` here is the organizer baseline: replace the model, keep the signature and the output format.
+* **Reading the file name.** `input_dir` keeps the released names `<scene>_<type>_<level>.png`. Your code may read the water **type and level** from the trailing
+  `_<type>_<level>` (your leaderboard pipeline could). In our check that each output depends only on its own input, we run Track 1 a second time on a copy
+  in which the **scene** part of every name is replaced by a random string and the trailing `_<type>_<level>` is kept. So read type and level from the **end**
+  of the name (for example `stem.rsplit("_", 2)`), and do not use the scene part or any other image.
 * `export_onnx.py` (Track 2) regenerates the ONNX file you submitted from your weights: static input (1, 3, H, W) in [0, 1],
   outputs `restored_image` and `seg_logits`, at most 12 GFLOPs and 1.0 M parameters. We compare it with your leaderboard ONNX.
   **Put every step between your checkpoint and the final file into this one script** (export, graph simplification, any quantization or
@@ -71,6 +76,10 @@ tracks makes two such repositories.
 
 **Committed:** small models go in `weights/`. Check that git really tracks them (`git ls-files weights`); delete `weights/weights_link.yaml`.
 
+**Large weights:** up to **20 GB**, as one file or one archive, behind a public link. Hugging Face is the most reliable host for big files (Google Drive may refuse very large
+downloads). Give the SHA-256, put the licence texts of third-party weights (for example the SAM licence) in the archive and list them in `METHOD.md`. At run time the
+weights are mounted **read-only** at `weights/` (`model_dir`); nothing is copied into the image. The whole model must fit on one 24 GB GPU and in 32 GB of RAM.
+
 **Link:** larger models go behind a public link described in `weights/weights_link.yaml` (`url:`, `sha256:` of the file, and optionally
 `filename:`); give the same link and hash in your factsheet. We download it **once, before the run**, verify the hash and save it in `weights/`
 under the name the link's server gives it, or under `filename:` if you set it (recommended, so your `run.py` knows the exact name). A `.zip` or
@@ -88,6 +97,25 @@ We compare our re-run with the submission you uploaded to the leaderboard, so `r
 submission: the same resizing and interpolation, the same normalisation, the same conversion to 8 bit (rounding or truncation: copy your own, the
 template's `run.py` uses the organizer baseline's), the same output sizes, the same device type if you can (the reference is whatever you used for the leaderboard;
 say in `METHOD.md` if it was a CPU or an unusual GPU). Run your own script and `run.py` on the same images and check the outputs are identical.
+
+## Need a different PyTorch version? Use your own Dockerfile
+
+The base image has PyTorch 2.4.0, CUDA 12.1 and Python 3.11. If your code needs something else (for example a newer `transformers` that needs PyTorch 2.5), put a
+`Dockerfile` at the **root** of your repository: we then build it **instead of** the base image plus `requirements.txt`. Do not pin `torch` in `requirements.txt`: it is a
+download of about 3 GB that is not reliable on our build machine.
+
+```dockerfile
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime      # already on our machine; the 2.4.0 image works too
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt  # pinned, WITHOUT torch
+COPY . /pkg
+WORKDIR /pkg
+```
+Rules: it is built from the repository root **with network access** (limit 30 minutes; another base image has to be downloaded within that time); it must copy the
+repository to `/pkg` (`COPY . /pkg`); `weights/` is left out of the build context and mounted read-only at `/pkg/weights` when your code runs; the container runs
+with **no network**, as an unprivileged user, with a read-only root and a 4 GB `/tmp` (set offline modes such as `HF_HUB_OFFLINE=1` and load models from `weights/`).
+The machine has an RTX 3090 and a driver that runs CUDA 12.x images (we tested PyTorch 2.5.1 with CUDA 12.4). `python repro_check.py .` checks the Dockerfile; to test
+the way we run it, build it yourself and run the checker inside with `--network none`.
 
 ## Data use
 

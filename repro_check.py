@@ -36,7 +36,9 @@ MAIN_PARAMS = ["model_dir", "input_dir", "output_dir", "device"]
 ONNX_PARAMS = ["model_dir", "out_onnx"]
 SUBMITTED_ONNX = "onnx/submitted_model.onnx"
 LINK_FILE = os.path.join("weights", "weights_link.yaml")
-MAX_PACKAGE_BYTES = 5 * 1024 ** 3
+DOWNLOAD_MARK = os.path.join("weights", ".downloaded_by_repro_check")   # top-level names that --download-weights created
+MAX_PACKAGE_BYTES = 5 * 1024 ** 3        # the repository itself, without weights fetched from a link
+MAX_WEIGHTS_BYTES = 20 * 1024 ** 3       # weights behind a link (one file or one archive)
 MAX_SIDE_WARN = 1024
 MAX_SIDE_ERR = 2048
 NUM_CLASSES = 5
@@ -172,11 +174,42 @@ BASE_IMAGE_PACKAGES = ("torch", "torchvision", "torchaudio", "numpy", "pillow", 
                        "timm", "einops", "onnx", "pyyaml", "scipy", "scikit-image")
 
 
+def check_dockerfile(pkg):
+    """A Dockerfile at the repository ROOT replaces 'base image + requirements.txt' (needed e.g. for another PyTorch version)."""
+    path = os.path.join(pkg, "Dockerfile")
+    if not os.path.isfile(path):
+        return
+    text = open(path, encoding="utf-8", errors="ignore").read()
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    if not any(ln.upper().startswith("FROM ") for ln in lines):
+        err("Dockerfile: no FROM line")
+    copies = any(re.match(r"(?i)COPY\s+\.\s+/pkg", ln) for ln in lines)
+    if not copies:
+        err("Dockerfile: it must copy the repository to /pkg (`COPY . /pkg`), the organizers' driver looks for your code there")
+    if any(re.match(r"(?i)(ADD|RUN\s+.*(wget|curl|git clone))", ln) and "http" in ln for ln in lines):
+        warn("Dockerfile downloads things while building: fine if it works (the build has network, limit 30 minutes), but anything your "
+             "code needs at run time must be in the image or in weights/ (there is NO network when it runs)")
+    if any(re.search(r"\bCOPY\b.*weights", ln) for ln in lines):
+        warn("Dockerfile copies weights into the image: not needed, `weights/` is mounted read-only at /pkg/weights when your code runs "
+             "(and it is left out of the build context)")
+    if copies:
+        ok("Dockerfile at the repository root (used instead of the base image + requirements.txt)")
+
+
 def check_weights(pkg):
     wdir = os.path.join(pkg, "weights")
     link = os.path.join(pkg, LINK_FILE)
+    mark = os.path.join(pkg, DOWNLOAD_MARK)
+    downloaded = set(open(mark).read().split()) if os.path.isfile(mark) else set()
     real = [f for f in (os.listdir(wdir) if os.path.isdir(wdir) else [])
-            if f not in ("weights_link.yaml", "README.md", ".gitkeep")]
+            if f not in ("weights_link.yaml", "README.md", ".gitkeep", os.path.basename(DOWNLOAD_MARK)) and f not in downloaded]
+    if downloaded and os.path.isdir(os.path.join(pkg, ".git")):
+        import subprocess
+        tracked = subprocess.run(["git", "-C", pkg, "ls-files", "--", "weights"], capture_output=True, text=True).stdout.split()
+        bad = [t for t in tracked if t.split("/")[1] in downloaded] if tracked else []
+        if bad:
+            err(f"files downloaded for testing are tracked by git ({bad[0]} ...): do not commit them to a link-based repository "
+                f"(git rm --cached -r them)")
     if os.path.isfile(link):
         d = read_flat_yaml(link)
         url = d.get("url")
@@ -200,7 +233,7 @@ def check_weights(pkg):
         fn = d.get("filename")
         if fn is not None and (not isinstance(fn, str) or os.path.basename(fn) != fn or fn.startswith(".")):
             err(f"{LINK_FILE}: `filename:` must be a plain file name without folders")
-        if not real:
+        if not real and not downloaded:
             print("note    the link is not downloaded by this check; to run --run on a link-based repository first fetch the file "
                   "with:  python repro_check.py . --download-weights")
     elif not real:
@@ -250,6 +283,10 @@ def download_weights(pkg):
     elif u.hostname == "huggingface.co" and "/blob/" in u.path:
         url = url.replace("/blob/", "/resolve/", 1)
     req = urllib.request.Request(url, headers={"User-Agent": "eurs-repro-check"})
+    os.makedirs(os.path.join(pkg, "weights"), exist_ok=True)
+    part = os.path.join(pkg, "weights", ".download.part")
+    digest_obj = hashlib.sha256()
+    size = 0
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             ctype = (resp.headers.get("Content-Type") or "").lower()
@@ -257,29 +294,80 @@ def download_weights(pkg):
             m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", cd, flags=re.I) or re.search(r'filename="?([^";]+)"?', cd, flags=re.I)
             name = d.get("filename") or (urllib.parse.unquote(m.group(1)).strip() if m else os.path.basename(urllib.parse.urlparse(resp.geturl()).path)) or "weights.bin"
             name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(name)).lstrip(".") or "weights.bin"
-            data = resp.read()
+            with open(part, "wb") as f:                       # streamed to disk: a 12 GB archive must not be held in memory
+                while True:
+                    chunk = resp.read(8 << 20)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_WEIGHTS_BYTES:
+                        raise ValueError(f"the download is larger than the {MAX_WEIGHTS_BYTES / 1024 ** 3:.0f} GB cap")
+                    digest_obj.update(chunk)
+                    f.write(chunk)
     except Exception as exc:
         err(f"download failed: {exc}")
+        if os.path.exists(part):
+            os.remove(part)
         return
-    if "text/html" in ctype and len(data) < (2 << 20):
+    if "text/html" in ctype and size < (2 << 20):
         err("the link returned a web page, not a file: is it shared as 'Anyone with the link' and a direct file link?")
+        os.remove(part)
         return
-    digest = hashlib.sha256(data).hexdigest()
+    digest = digest_obj.hexdigest()
     want = str(d.get("sha256") or "").lower()
     if want and digest != want:
         err(f"SHA-256 mismatch: {LINK_FILE} says {want}, the downloaded file is {digest}")
+        os.remove(part)
         return
-    os.makedirs(os.path.join(pkg, "weights"), exist_ok=True)
     out = os.path.join(pkg, "weights", name)
-    with open(out, "wb") as f:
-        f.write(data)
-    ok(f"downloaded {len(data)} bytes to weights/{name} (sha256 {digest[:12]}...). The organizers' pipeline saves it under the same name, "
-       f"or under `filename:` if you set it. A .zip or .tar.gz is unpacked into weights/ there (not by this command: unpack it yourself to test). "
-       "Do not commit the downloaded file to a link-based repository.")
+    os.replace(part, out)
+    created = [name]
+    lower = name.lower()
+    if lower.endswith((".zip", ".tar.gz", ".tgz", ".tar")):
+        try:
+            created = _unpack(out, os.path.join(pkg, "weights"))
+            os.remove(out)                                   # like the organizers' pipeline: the archive itself is not kept
+        except Exception as exc:
+            err(f"the downloaded archive could not be unpacked: {exc}")
+            return
+    with open(os.path.join(pkg, DOWNLOAD_MARK), "w") as f:
+        f.write("\n".join(sorted(set(created))) + "\n")
+    ok(f"downloaded {size} bytes (sha256 {digest[:12]}...) into weights/ ({', '.join(sorted(set(created))[:5])}). The organizers' pipeline "
+       f"saves it under the same name, or under `filename:` if you set it, and unpacks a .zip / .tar.gz the same way. These files are only for "
+       f"testing: do not commit them to a link-based repository (they are not counted as committed weights by this check).")
+
+
+def _unpack(archive, dest):
+    """Safe extraction (no absolute paths, no '..', no links); returns the top-level names created."""
+    import tarfile
+    import zipfile
+    dest_real = os.path.realpath(dest)
+    tops = set()
+
+    def safe(name):
+        target = os.path.realpath(os.path.join(dest, name))
+        if not (target == dest_real or target.startswith(dest_real + os.sep)) or os.path.isabs(name):
+            raise ValueError(f"unsafe path in the archive: {name}")
+        tops.add(name.split("/")[0])
+    if archive.lower().endswith(".zip"):
+        with zipfile.ZipFile(archive) as z:
+            for m in z.infolist():
+                safe(m.filename)
+            z.extractall(dest)
+    else:
+        with tarfile.open(archive) as t:
+            for m in t.getmembers():
+                if m.issym() or m.islnk() or m.isdev():
+                    raise ValueError(f"links and devices are not allowed in the archive: {m.name}")
+                safe(m.name)
+            t.extractall(dest)
+    return tops
 
 
 def check_tree(pkg):
     total = 0
+    weights_total = 0
+    link_based = os.path.isfile(os.path.join(pkg, LINK_FILE))
     abs_paths = []
     unpinned = []
     for root, dirs, files in os.walk(pkg):
@@ -292,7 +380,10 @@ def check_tree(pkg):
             p = os.path.join(root, n)
             if os.path.islink(p):
                 continue
-            total += os.path.getsize(p)
+            if link_based and os.path.relpath(p, pkg).startswith("weights" + os.sep) and n != os.path.basename(LINK_FILE):
+                weights_total += os.path.getsize(p)          # downloaded for the test, not part of the repository
+            else:
+                total += os.path.getsize(p)
             if n.endswith(".py") and n != "repro_check.py":
                 try:
                     text = open(p, encoding="utf-8", errors="ignore").read()
@@ -305,6 +396,8 @@ def check_tree(pkg):
                          "(weights must come from weights/)")
     if total > MAX_PACKAGE_BYTES:
         err(f"the repository is {total / 1024 ** 3:.1f} GB, over the {MAX_PACKAGE_BYTES / 1024 ** 3:.0f} GB cap: put big weights behind a link")
+    if weights_total > MAX_WEIGHTS_BYTES:
+        err(f"the weights are {weights_total / 1024 ** 3:.1f} GB, over the {MAX_WEIGHTS_BYTES / 1024 ** 3:.0f} GB cap for weights behind a link")
     for p in sorted(set(abs_paths)):
         warn(f"{p} contains absolute paths (/home, /Users, /data, C:\\): the code must run from any folder")
     req = os.path.join(pkg, "requirements.txt")
@@ -323,6 +416,9 @@ def check_tree(pkg):
             if name in BASE_IMAGE_PACKAGES:
                 base.append(name)
         if base:
+            if "torch" in base and not os.path.isfile(os.path.join(pkg, "Dockerfile")):
+                warn("requirements.txt pins torch: the base image has PyTorch 2.4.0 and a torch download is about 3 GB (slow and unreliable on the "
+                     "organizers' build machine). If you need another PyTorch version, put a Dockerfile at the repository root instead (see the README)")
             warn("requirements.txt lists packages the base image already has (" + ", ".join(base) + "): installing them would replace the "
                  "organizers' versions (PyTorch 2.4.0 etc.) and change your results. List ONLY extra packages; leave the file empty if you need none")
 
@@ -554,6 +650,7 @@ def main():
     check_method(pkg)
     check_entry_points(pkg, track)
     check_weights(pkg)
+    check_dockerfile(pkg)
     check_tree(pkg)
     if args.run:
         if not args.input or not os.path.isdir(args.input):
