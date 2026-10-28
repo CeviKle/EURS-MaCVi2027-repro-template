@@ -119,8 +119,11 @@ the way we run it, build it yourself and run the checker inside with `--network 
 
 ## Data use
 
-The released testing-phase images are for producing your submission only. Do not use them for training, tuning, model selection, pseudo-labelling or
-any adaptation of the model. Say in `METHOD.md` which data your weights were trained on, and answer the matching question in the factsheet.
+The released testing-phase images are for producing your submission only. Do not train, fine-tune, pseudo-label or otherwise adapt a model on them, and do not
+use one test image to change the output for another. **Allowed:** choosing between your own submissions, or setting a few global values (a random seed,
+which models go into an ensemble, weights, thresholds), from the **leaderboard scores** of your testing-phase submissions, as long as each choice is one
+fixed value applied identically to every image and you state it in the factsheet (Section 2). Say in `METHOD.md` which data your weights were trained on,
+and answer the matching questions in the factsheet.
 
 ## How a re-run is judged
 
